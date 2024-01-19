@@ -2,6 +2,7 @@ import os
 import trimesh
 import numpy as np
 import tkinter as tk
+import math
 from tkinter import ttk
 
 #Beállítások
@@ -14,6 +15,8 @@ ykomponens = 2 #A komponensek száma az y tengely mentén
 xkomponens = 1 #A komponensek száma az x tengely mentén
 kfal = 2 #Külső falak vastagsága
 bfal =  1 #Belső falak vastagsága
+simasag = 10 #A kivágás simasága egy iterációs szám, hogy hány részből álljon a lekerekítés
+kerekites = True #Kerekítés a generálásnál
 
 # Csak, hogy vscode alatt is ugyanabba a mappába generáljon
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -21,8 +24,7 @@ def errorwindow(message):
     #Error window
     error=tk.Tk()
     error.title("Error")
-    error.geometry("200x50")
-    errorlabel = tk.Label(error, text="Hibás argumentumok!")
+    errorlabel = tk.Label(error, text=message,anchor="e")
     errorlabel.pack()
     error.mainloop()
 
@@ -38,6 +40,26 @@ def boxgenerator():
         kfal = float(kfalvalue.get())
         bfal = float(bfalvalue.get())
         megnyit = megnyit2.get()
+        kerekites = kerekites2.get()
+        simasag = int(simasagvalue.get())
+        
+        #Értékek ellenőrzése, hogy valóban dobozt generálunk-e  (kikommentelhetö, de akkor furcsa alakzatokat is lehet generálni)
+        if bz > z:
+            errorwindow("A belső falak magassága nem lehet nagyobb a doboz magasságánál!")
+            return
+        if 2*kfal > x or 2*kfal > y:
+            errorwindow("A külső falak vastagsága nem lehet nagyobb a doboz méretének felénél!")
+            return
+        if kfal>z:
+            errorwindow("A külső falak vastagsága nem lehet nagyobb a doboz magasságánál!")
+            return
+        if bfal*xkomponens+2*kfal>x:
+            errorwindow("A falak vastagsága nem lehet nagyobb a doboz szélességénél!")
+            return
+        if bfal*ykomponens+2*kfal>y:
+            errorwindow("A falak vastagsága nem lehet nagyobb a doboz mélységénél!")
+            return
+        
     except Exception:
         errorwindow("Hibás argumentumok!")
         return
@@ -45,6 +67,26 @@ def boxgenerator():
     points = [[x,y,z], [x,y,0], [x,0,z], [x,0,0], [0,y,z], [0,y,0], [0,0,z], [0,0,0]]
     cloud = trimesh.points.PointCloud(points)
     hull_mesh = cloud.convex_hull
+    
+    #A doboz széleinek kerekítése
+    if kerekites:
+        #A négy külső falat egyszerre vágjuk ki
+        #Vastagságnyit kerekítünk
+        points = [[x,y,z], [x,y,z-kfal], [x,0,z], [x,0,z-kfal], [0,y,z], [0,y,z-kfal], [0,0,z], [0,0,z-kfal]]
+        cloud4 = trimesh.points.PointCloud(points)
+        hull_mesh4 = cloud4.convex_hull
+        hull_mesh = hull_mesh.difference(hull_mesh4)
+        
+        #Kitöltjük "piramis" szerűen a kivágást
+        for i in range(1,simasag):
+            x3 = x
+            y3 = y
+            seg=i*kfal/simasag
+            z3=z-kfal+seg
+            poinst3 = [[x-seg,y-seg,z3], [x-seg,y-seg,z-kfal], [x-seg,seg,z3], [x-seg,seg,z-kfal], [seg,y-seg,z3], [seg,y-seg,z-kfal], [seg,seg,z3], [seg,seg,z-kfal]]
+            cloud3 = trimesh.points.PointCloud(poinst3)
+            hull_mesh3 = cloud3.convex_hull
+            hull_mesh = hull_mesh+hull_mesh3
     
     #Doboz belsejének törlése (külső falak megtartásával)
     x2 = x - kfal
@@ -55,6 +97,8 @@ def boxgenerator():
     hull_mesh2 = cloud2.convex_hull
     hull_mesh = hull_mesh.difference(hull_mesh2)
     xkomponens*((x-2*kfal)/xkomponens+(3*bfal/xkomponens))
+    
+    
     #Belső falak generálása x mentén
     for i in range(1,xkomponens):
         x3 = i*x2/xkomponens
@@ -149,16 +193,44 @@ bfalvalue = tk.Entry(root)
 bfalvalue.insert(0, bfal)
 bfalvalue.grid(row=7, column=1)
 
+#Kerekítés checkbox
+kerekites2= tk.BooleanVar()
+kerekiteslabel = tk.Label(root, text="Kerekítés:",anchor="e")
+kerekiteslabel.grid(row=8, column=0, sticky="e")
+kerekites = tk.Checkbutton(root,variable=kerekites2,onvalue=True, offvalue=False,anchor="w")
+kerekites.select()
+kerekites.grid(row=8, column=1, sticky="w")
+
+#Simaság beállítása
+simasagshow =  tk.Label(root, text="Simaság=",anchor="e")
+simasagvalue = tk.Entry(root)
+simasagvalue.insert(0, simasag)
+#Nem írható ki a függvénnyel, mert először igaz lesz, viszont kattintáskor még a változó csere előtt hívódik meg a függvény
+simasagshow.grid(row=9, column=0, sticky="e")
+simasagvalue.grid(row=9, column=1)
+def check_kerekit(*args):
+    #A kattintás előtti állapotban meghívódik
+    if not kerekites2.get():
+        simasagshow.grid(row=9, column=0, sticky="e")
+        simasagvalue.grid(row=9, column=1)
+    else:
+        simasagshow.grid_remove()
+        simasagvalue.pack_forget()
+        simasagshow.pack_forget()
+        simasagvalue.grid_remove()
+#"Listener" hozzáadása a kerekítés checkboxhoz
+kerekites.bind("<Button-1>", check_kerekit)
+
 #Megnyitás checkbox
 megnyit2= tk.BooleanVar()
+megnyitaslabel = tk.Label(root, text="Megnyitás:",anchor="e")
+megnyitaslabel.grid(row=10, column=0, sticky="e")
 megnyitas = tk.Checkbutton(root,variable=megnyit2,onvalue=True, offvalue=False,anchor="w")
 megnyitas.select()
-megnyitas.grid(row=8, column=1, sticky="w")
-megnyitaslabel = tk.Label(root, text="Megnyitás:",anchor="e")
-megnyitaslabel.grid(row=8, column=0, sticky="e")
+megnyitas.grid(row=10, column=1, sticky="w")
 
 #Generálás gomb
 button = tk.Button(root, text="Generate!", command=program)
-button.grid(row=9, column=0, columnspan=2)
+button.grid(row=11, column=0, columnspan=2)
 
 root.mainloop()
